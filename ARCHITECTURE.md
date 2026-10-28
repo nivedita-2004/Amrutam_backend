@@ -232,20 +232,6 @@ erDiagram
    - Omitting header preserves backward compatibility.
    - Concurrent duplicates block on `uq_idempotency_user_op_key` and safely replay once the winner commits.
 
-### Reliability Topic Breakdown
-
-| Architecture Topic | Status | Repository Implementation |
-|---|---|---|
-| **Database Transactions** | **Implemented** | Full ACID transactions using transactional `client` checkouts. |
-| **Row Locking** | **Implemented** | `SELECT ... FOR UPDATE` on slot booking and lifecycle updates. |
-| **Idempotency** | **Implemented** | Full request idempotency on `POST /api/consultations`. |
-| **Engine Constraints** | **Implemented** | Foreign keys, partial unique indexes, and GiST exclusion constraints. |
-| **Error Handling & Rollback** | **Implemented** | Centralized error handler with automatic transaction aborts. |
-| **Retry & Backoff Strategy** | **Partially Implemented** | Server safely supports client retries; no client-side SDK or backoff helper. |
-| **Caching Layer** | **Not Implemented** | No Redis/Memcached; all queries execute against PostgreSQL. |
-| **Data Partitioning** | **Not Implemented** | Single monolithic PostgreSQL instance. |
-| **Asynchronous Queues** | **Not Implemented** | All operations run synchronously within the HTTP request cycle. |
-| **Distributed Sagas** | **Not Implemented** | Monolithic architecture uses local ACID transactions; sagas are unnecessary. |
 
 ### Scalability Roadmap (Target: 100,000 Daily Consultations)
 An operational target of 100,000 daily consultations represents an average write rate of ~1.2 bookings/sec, with peak loads of 15–25 writes/sec and 150–250 reads/sec. Scaling reliably to this target requires:
