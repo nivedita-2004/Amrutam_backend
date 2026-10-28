@@ -1,6 +1,8 @@
 
 
 
+# Amrutam Telemedicine Backend
+
 ## 1. Project Overview & Technology Stack
 
 The **Amrutam Telemedicine Backend** delivers a complete Ayurvedic consultation workflow: user authentication with role-based access control (Patient, Doctor, Admin), doctor discovery and availability management, concurrent race-protected consultation booking with request-level idempotency, clinical prescriptions, internal payment records, administrative verification, and audit logging.
@@ -11,7 +13,7 @@ The **Amrutam Telemedicine Backend** delivers a complete Ayurvedic consultation 
 |---|---|---|---|
 | **Runtime** | Node.js | `>=20.0.0` (LTS 20 / 22) | Server-side JavaScript runtime |
 | **Framework** | Express.js | `^5.3.0` | Fast, minimalist web framework |
-| **Database** | PostgreSQL | `17-alpine` (Docker) / `17` or `18` (Local) | Relational database with GiST and transaction support |
+| **Database** | PostgreSQL | `17` or `18` | Relational database with GiST and transaction support |
 | **Driver** | `pg` (node-postgres) | `^8.23.1` | Native connection pooling and parameterized SQL |
 | **Security** | `helmet`, `cors`, `bcryptjs` | `^8.3.0`, `^2.8.6`, `^3.0.3` | HTTP header hardening, CORS, password hashing (cost=10) |
 | **Authentication** | `jsonwebtoken`, `cookie-parser` | `^9.0.3`, `^1.4.7` | HMAC-SHA256 JWTs and HTTP-only cookie session handling |
@@ -72,67 +74,18 @@ The schema is partitioned into **8 Core Business Tables** and **3 Supporting Inf
 
 ---
 
-## 3. Quick Start with Docker
+## 3. Local Development Setup
 
-The repository includes a production-ready `Dockerfile` and `docker-compose.yml` configured with an isolated bridge network, health checks, and persistent PostgreSQL storage.
-
-### PostgreSQL Version Note
-- The Docker Compose environment standardizes on **`postgres:17-alpine`**.
-- Local installations may use **PostgreSQL 17** or **PostgreSQL 18**; all SQL queries and extensions are compatible with both versions.
-
-### Step 1: Start Containers
-Launch the database and API services in detached mode:
-```bash
-docker compose up -d
-```
-- `amrutam_postgres_db` starts on the internal Docker network `amrutam_net`.
-- `amrutam_api` waits for PostgreSQL to become healthy before launching on port `5000`.
-
-### Step 2: Apply Database Migrations
-Migrations are managed deterministically via `database/migrate.js` and must be applied before the API serves requests:
-```bash
-docker compose exec api npm run db:migrate
-```
-
-### Step 3 (Optional): Seed Development Data
-To seed initial demo accounts (patients, doctors, admin):
-```bash
-docker compose exec -e NODE_ENV=development api npm run db:seed
-```
-> **Note**: `seed.js` includes a safeguard that rejects running when `NODE_ENV=production`. Supplying `-e NODE_ENV=development` allows seeding demo data safely.
-
-### Step 4: Verify Container Health
-```bash
-# Check liveness probe
-curl -i http://localhost:5000/health/live
-
-# Check database readiness probe
-curl -i http://localhost:5000/health/ready
-```
-
-### Step 5: Teardown
-```bash
-# Stop containers while preserving data
-docker compose down
-
-# Stop containers and destroy the persistent volume (clean slate)
-docker compose down -v
-```
-
----
-
-## 4. Local Development Setup
-
-For developers running directly on host machines without Docker.
+The Amrutam Telemedicine Backend runs directly on your local system using Node.js, npm, and a native PostgreSQL database. Docker is not required.
 
 ### Prerequisites
 - **Node.js**: v20+ or v22+ LTS (`node -v`)
 - **npm**: v10+ or v11+ (`npm -v`)
-- **PostgreSQL**: v17 or v18 running locally on port 5432
+- **PostgreSQL**: v17 or v18 running locally on port 5432 (`psql --version`)
 
 ### Step 1: Clone & Install Dependencies
 ```bash
-git clone <repository_url>
+git clone https://github.com/nivedita-2004/Amrutam_backend.git
 cd Amrutum_assessement
 npm install
 ```
@@ -146,7 +99,11 @@ CREATE DATABASE amrutam_db;
 ### Step 3: Configure Environment Variables
 Copy `.env.example` to `.env`:
 ```bash
+# On Linux / macOS:
 cp .env.example .env
+
+# On Windows PowerShell:
+Copy-Item .env.example .env
 ```
 Update `.env` with your local database credentials:
 ```ini
@@ -182,7 +139,7 @@ npm run db:migrate
 npm run db:seed
 ```
 
-### Step 5: Start Development Server
+### Step 5: Start Server
 ```bash
 # Start with hot-reload (nodemon)
 npm run dev
@@ -192,9 +149,23 @@ npm start
 ```
 The server will bind to `http://localhost:5000`.
 
+### Step 6: Verify Health Probes
+```bash
+# Check liveness probe
+curl -i http://localhost:5000/health/live
+
+# Check database readiness probe
+curl -i http://localhost:5000/health/ready
+```
+
+### Step 7: Run Automated Tests
+```bash
+npm test
+```
+
 ---
 
-## 5. Database Migrations & Seeding
+## 4. Database Migrations & Seeding
 
 Migrations are executed sequentially by `database/migrate.js`. The runner acquires a PostgreSQL session advisory lock (`pg_advisory_lock`) to serialize concurrent migration runs safely.
 
@@ -221,7 +192,7 @@ npm run db:backfill-doctors
 
 ---
 
-## 6. Repository Structure
+## 5. Repository Structure
 
 ```
 Amrutum_assessement/
@@ -320,12 +291,9 @@ Amrutum_assessement/
 │   │   └── routeScaffold.test.js       # Route registration and 404 handler (1 test)
 │   └── unit/
 │       └── db.test.js                  # Database connection pool tests (3 tests)
-├── .dockerignore
 ├── .env.example
 ├── .gitignore
 ├── ARCHITECTURE.md                     # Comprehensive backend architecture document
-├── Dockerfile                          # Multi-stage production container build
-├── docker-compose.yml                  # Docker Compose configuration (Postgres 17 + API)
 ├── openapi.yaml                        # Complete OpenAPI 3.0.3 specification
 ├── package.json                        # Dependencies, scripts, and Jest configuration
 ├── package-lock.json
@@ -335,7 +303,7 @@ Amrutum_assessement/
 
 ---
 
-## 7. Authentication & Session Management
+## 6. Authentication & Session Management
 
 Authentication uses short-lived JWT access tokens accompanied by atomic refresh-token rotation stored in PostgreSQL.
 
@@ -459,7 +427,7 @@ Retrieves the authenticated user's account details and profile.
 
 ---
 
-## 8. Patient Profile API
+## 7. Patient Profile API
 
 Endpoints under `/api/users` manage patient demographic information.
 
@@ -524,7 +492,7 @@ Allows partial updates while preserving omitted fields. Validated by Zod against
 
 ---
 
-## 9. Doctor Directory & Profile API
+## 8. Doctor Directory & Profile API
 
 Endpoints under `/api/doctors` provide public discovery and doctor credential management.
 
@@ -612,7 +580,7 @@ Allows an authenticated doctor to update their own clinical credentials, bio, an
 
 ---
 
-## 10. Doctor Availability Scheduling API
+## 9. Doctor Availability Scheduling API
 
 Endpoints under `/api/availability` manage doctor calendar slots.
 
@@ -704,7 +672,7 @@ Deletes an unbooked slot. Booked slots return `409 Conflict`.
 
 ---
 
-## 11. Consultation Booking & Idempotency API
+## 10. Consultation Booking & Idempotency API
 
 Endpoints under `/api/consultations` handle patient bookings, cancellations, and status queries.
 
@@ -828,7 +796,7 @@ Atomically marks consultation as `cancelled` and releases the associated availab
 
 ---
 
-## 12. Prescription Management API
+## 11. Prescription Management API
 
 Endpoints under `/api/prescriptions` handle clinical Ayurvedic recommendations.
 
@@ -890,7 +858,7 @@ Enforces privacy boundaries: only the receiving patient, issuing doctor, or admi
 
 ---
 
-## 13. Payment Billing Records API
+## 12. Payment Billing Records API
 
 Endpoints under `/api/payments` provide internal billing ledger management.
 
@@ -938,7 +906,7 @@ Retrieves the payment ledger entry for a specific consultation.
 
 ---
 
-## 14. Admin Management & Analytics API
+## 13. Admin Management & Analytics API
 
 Endpoints under `/api/admin` provide administrative oversight. Restricted strictly to `role: 'admin'`.
 
@@ -998,34 +966,34 @@ Updates a doctor's verification status. Note: `:id` in the URL path is `doctors.
 
 ---
 
-## 15. Observability, Logging & Health Probes
+## 14. Observability, Logging & Health Probes
 
-### 15.1 Health Probes
-Configured for Kubernetes / container orchestrator health checks. Probes are excluded from HTTP logging to prevent log pollution.
+### 14.1 Health Probes
+Configured for application runtime and health check monitoring. Probes are excluded from HTTP logging to prevent log pollution.
 
 | Probe | Endpoint | Method | Success Response | Failure Response |
 |---|---|---|---|---|
 | **Liveness** | `/health/live` | `GET` | `200 OK` (`{"status":"UP","uptime":120}`) | Process failure |
 | **Readiness** | `/health/ready` | `GET` | `200 OK` (`{"status":"UP","database":"connected"}`) | `503 Service Unavailable` (`{"status":"DOWN"}`) |
 
-### 15.2 Request Correlation (`X-Request-Id`)
+### 14.2 Request Correlation (`X-Request-Id`)
 Implemented in `src/middleware/requestId.middleware.js`:
 - Inspects incoming `X-Request-Id` HTTP header. If provided and valid (alphanumeric/hyphen/underscore, max 100 chars), preserves it.
 - If missing or invalid, generates a UUIDv4 via `crypto.randomUUID()`.
 - Sets `X-Request-Id` on the outgoing response header and binds `req.id` to all logs and database audit entries.
 
-### 15.3 Structured Logging (Pino)
+### 14.3 Structured Logging (Pino)
 - Powered by `pino` (v10) and `pino-http` (v11).
 - Outputs machine-readable JSON with log levels (`info`, `warn`, `error`).
 - Automatically serializes request method, URL, status code, and response time in milliseconds.
 
-### 15.4 Database Audit Trail (`audit_logs`)
+### 14.4 Database Audit Trail (`audit_logs`)
 - Records security-sensitive operations: user registration, logins, token rotation, slot creation, consultation bookings, cancellations, and doctor verifications.
 - Automatically redacts passwords, tokens, cookies, and secret keys before storing JSONB metadata.
 
 ---
 
-## 16. Automated Testing & CI Pipeline
+## 15. Automated Testing & CI Pipeline
 
 The backend includes a comprehensive automated test suite powered by **Jest** and **Supertest**. Tests run against a live PostgreSQL database to validate transactions, constraints, and race conditions.
 
@@ -1061,14 +1029,15 @@ Time:        11.476 s
 | **Route Scaffolding** | `tests/integration/routeScaffold.test.js` | **1** | Express middleware order, route registration, and 404 handler for undefined endpoints. |
 
 ### Continuous Integration (GitHub Actions)
-The repository includes `.github/workflows/ci.yml` which executes on every push and pull request:
+The repository includes `.github/workflows/ci.yml` which executes on every push and pull request to `main`, `master`, and `develop`:
 - Matrix strategy testing on **Node.js 20.x** and **Node.js 22.x**.
-- Spins up a `postgres:17-alpine` container service.
-- Executes `npm ci`, runs `npm run db:migrate`, and executes `npm test`.
+- Automatically provisions a dedicated PostgreSQL 17 test service within the GitHub Actions runner.
+- Executes `npm ci`, applies database migrations (`npm run db:migrate`), and runs the full automated test suite (`npm test`).
+- Reviewers do not need Docker locally; the CI pipeline is entirely self-contained on GitHub.
 
 ---
 
-## 17. Security & Concurrency Protections
+## 16. Security & Concurrency Protections
 
 ### 1. In-Memory Rate Limiting
 Configured using `express-rate-limit` with standalone in-memory counters (no Redis required for standalone operation):

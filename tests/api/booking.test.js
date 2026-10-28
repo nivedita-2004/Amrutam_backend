@@ -440,7 +440,7 @@ describe('Doctor Availability and Consultation Booking (/api/availability & /api
           const userRes = await pool.query(
             `INSERT INTO users (name, email, password_hash, role, status)
              VALUES ($1, $2, '$2a$10$FakeHashForTestingOnly123', 'doctor', 'active')
-             ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
+             ON CONFLICT (LOWER(email)) DO UPDATE SET name = EXCLUDED.name
              RETURNING id`,
             [name, email]
           );

@@ -267,14 +267,13 @@ An operational target of 100,000 daily consultations represents an average write
 - **Observability Gaps**: Prometheus metrics scraping, OpenTelemetry distributed tracing, and APM alerting are **not implemented**.
 
 ### Deployment & CI
-- **Docker**: Multi-stage `Dockerfile` based on `node:20-alpine`, runs as non-root user `node`, exposes port 5000, and defines a container health check.
-- **Docker Compose**: Orchestrates the API and a `postgres:17-alpine` container with named volume persistence (`postgres_data`) on an isolated bridge network (`amrutam_net`).
-- **CI Pipeline**: GitHub Actions (`.github/workflows/ci.yml`) runs on pushes/PRs to `main`, `master`, and `develop`. It spins up a PostgreSQL 17 service container, executes migrations, and validates the test suite across Node.js 20.x and 22.x.
+- **Local Runtime**: Native Node.js (v20+ / v22+) connecting directly to a locally installed PostgreSQL (v17 or v18) instance without requiring Docker.
+- **CI Pipeline**: GitHub Actions (`.github/workflows/ci.yml`) runs on pushes/PRs to `main`, `master`, and `develop`. It spins up an automated PostgreSQL 17 test service, executes migrations, and validates the test suite across Node.js 20.x and 22.x.
 
 ### Disaster Recovery
-- **Backup Procedures**: Documented in `docs/backup-and-recovery.md` using logical dumps (`pg_dump -F c`) and restore commands (`pg_restore`).
+- **Backup Procedures**: Documented in `docs/backup-and-recovery.md` using native logical dumps (`pg_dump -F c`) and restore commands (`pg_restore`).
 - **Recovery Gaps**: Continuous WAL archiving for Point-In-Time Recovery (PITR), automated backup schedules, and cloud object replication (e.g. AWS S3) are **not currently automated in code**.
-- **Recommended Targets**: RPO < 15 minutes (via automated WAL archiving) and RTO < 30 minutes (via containerized restore scripts).
+- **Recommended Targets**: RPO < 15 minutes (via automated WAL archiving) and RTO < 30 minutes (via native PostgreSQL restore procedures).
 
 ---
 
@@ -291,7 +290,7 @@ An operational target of 100,000 daily consultations represents an average write
 | **Structured Logging & Probes** | Pino JSON logging, `X-Request-Id` correlation, `/health/live` and `/health/ready` probe endpoints. | **Implemented** |
 | **Rate Limiting** | In-memory sliding window limiter protecting global API and sensitive authentication endpoints. | **Implemented** |
 | **Automated Testing & CI** | 167 automated unit and integration tests passing with Jest and Supertest; automated GitHub Actions CI pipeline on Node 20 and 22. | **Implemented** |
-| **Containerization** | Production-ready multi-stage `Dockerfile` and `docker-compose.yml` for local and containerized orchestration. | **Implemented** |
+| **Local Runtime & PostgreSQL** | Pure Node.js, npm, and native PostgreSQL setup with zero Docker dependency for local execution. | **Implemented** |
 | **Payment Gateway Integration** | Internal database record tracking only (`/api/payments`); external webhooks/gateway SDKs are not integrated. | **Partially Implemented** |
 | **Multi-Factor Authentication (MFA)** | Not present in authentication flow. | **Not Implemented** |
 | **Caching & Asynchronous Queues** | No Redis cache or background message broker (RabbitMQ/BullMQ); all requests processed synchronously. | **Not Implemented** |
