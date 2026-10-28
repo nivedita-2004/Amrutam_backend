@@ -264,7 +264,6 @@ An operational target of 100,000 daily consultations represents an average write
 - **Request Correlation**: The `requestId.middleware` extracts or generates an `X-Request-Id`, propagating it through logs, error payloads, and response headers.
 - **Health Probes**: `GET /health/live` returns process uptime; `GET /health/ready` executes a database `SELECT 1` ping (returns `503` if disconnected).
 - **Audit Trails**: Business events write structured audit records to `audit_logs` with sanitized JSONB metadata.
-- **Observability Gaps**: Prometheus metrics scraping, OpenTelemetry distributed tracing, and APM alerting are **not implemented**.
 
 ### Deployment & CI
 - **Local Runtime**: Native Node.js (v20+ / v22+) connecting directly to a locally installed PostgreSQL (v17 or v18) instance without requiring Docker.
@@ -292,6 +291,3 @@ An operational target of 100,000 daily consultations represents an average write
 | **Automated Testing & CI** | 167 automated unit and integration tests passing with Jest and Supertest; automated GitHub Actions CI pipeline on Node 20 and 22. | **Implemented** |
 | **Local Runtime & PostgreSQL** | Pure Node.js, npm, and native PostgreSQL setup with zero Docker dependency for local execution. | **Implemented** |
 | **Payment Gateway Integration** | Internal database record tracking only (`/api/payments`); external webhooks/gateway SDKs are not integrated. | **Partially Implemented** |
-| **Multi-Factor Authentication (MFA)** | Not present in authentication flow. | **Not Implemented** |
-| **Caching & Asynchronous Queues** | No Redis cache or background message broker (RabbitMQ/BullMQ); all requests processed synchronously. | **Not Implemented** |
-| **Automated Backup & Disaster Recovery** | Standard operating procedures documented in `docs/backup-and-recovery.md`; automated WAL archiving and remote replication require infrastructure setup. | **Partially Implemented** |
