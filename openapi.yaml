@@ -1,0 +1,2448 @@
+openapi: 3.0.3
+info:
+  title: Amrutam Telemedicine Backend API
+  description: >-
+    Production-grade RESTful API for Ayurvedic telemedicine consultations, certified doctor directory,
+    availability scheduling, consultation booking with request-level idempotency, clinical prescriptions,
+    fee payment tracking, and administrative oversight.
+  version: 1.0.0
+servers:
+  - url: http://localhost:5000
+    description: Local development server
+
+tags:
+  - name: Health
+    description: Service liveness and dependency readiness health probes
+  - name: Authentication
+    description: User registration, credentials authentication, session refresh, and token lifecycle management
+  - name: Users
+    description: Patient account and personal profile management
+  - name: Doctors
+    description: Public practitioner directory and doctor professional profile operations
+  - name: Availability
+    description: Doctor calendar availability slots and schedule management
+  - name: Consultations
+    description: Consultation booking with request-level idempotency, retrieval, cancellation, and clinical lifecycle updates
+  - name: Prescriptions
+    description: Structured Ayurvedic prescription issuance and clinical history
+  - name: Payments
+    description: Consultation fee settlement and billing records
+  - name: Administration
+    description: Platform metrics, doctor credential verification, and administrative operations
+
+paths:
+  /health/live:
+    get:
+      tags:
+        - Health
+      summary: Liveness Probe
+      description: Returns HTTP 200 if the Node.js Express process is active.
+      responses:
+        '200':
+          description: Process is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: UP
+                  timestamp:
+                    type: string
+                    format: date-time
+                  uptime:
+                    type: integer
+                    example: 3600
+
+  /health/ready:
+    get:
+      tags:
+        - Health
+      summary: Readiness Probe
+      description: Executes a PostgreSQL connectivity ping (`SELECT 1`) to verify database availability.
+      responses:
+        '200':
+          description: Database is connected and ready to accept traffic
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: UP
+                  database:
+                    type: string
+                    example: connected
+                  timestamp:
+                    type: string
+                    format: date-time
+        '503':
+          description: Database is disconnected or unreachable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: DOWN
+                  database:
+                    type: string
+                    example: disconnected
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /api/auth/signup:
+    post:
+      tags:
+        - Authentication
+      summary: Register a new patient or doctor account
+      description: >-
+        Registers a new user account. Patients receive an active account and profile record.
+        Doctors automatically receive an associated unverified doctor record.
+        Sets HTTP-only 'accessToken' and 'refreshToken' cookies upon successful registration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name:
+                  type: string
+                  minLength: 2
+                  maxLength: 100
+                  example: Sita Sharma
+                email:
+                  type: string
+                  format: email
+                  maxLength: 255
+                  example: sita.sharma@example.com
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                  maxLength: 100
+                  example: SecurePass123!
+                role:
+                  type: string
+                  enum: [patient, doctor]
+                  default: patient
+                  example: patient
+                specialization:
+                  type: string
+                  minLength: 2
+                  maxLength: 100
+                  description: Required when registering with role 'doctor'
+                  example: Kayachikitsa & Panchakarma
+                qualification:
+                  type: string
+                  minLength: 2
+                  maxLength: 255
+                  description: Required when registering with role 'doctor'
+                  example: BAMS, MD (Ayurveda)
+      responses:
+        '201':
+          description: User registered successfully
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: accessToken=...; HttpOnly; SameSite=Lax, refreshToken=...; HttpOnly; SameSite=Lax
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: User registered successfully
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/User'
+        '400':
+          description: Validation error or attempt to self-register as admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Email address already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: Authenticate user credentials
+      description: >-
+        Authenticates user with email and password. Generates an access token and refresh token,
+        persists the hashed refresh token with family tracking, and sets HTTP-only cookies.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: sita.sharma@example.com
+                password:
+                  type: string
+                  format: password
+                  example: SecurePass123!
+      responses:
+        '200':
+          description: Login successful
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: accessToken=...; HttpOnly; SameSite=Lax, refreshToken=...; HttpOnly; SameSite=Lax
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Login successful
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/User'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Invalid email or password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Account is inactive or suspended
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Rotate refresh token and issue new token pair
+      description: >-
+        Provides automatic refresh token rotation. Accepts the refresh token from an HTTP-only cookie
+        or the request body. If a revoked or already-rotated token is reused, the entire token family
+        is invalidated for security.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken:
+                  type: string
+                  description: Optional if provided via HTTP-only cookie
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+      responses:
+        '200':
+          description: Tokens refreshed successfully
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: accessToken=...; HttpOnly; SameSite=Lax, refreshToken=...; HttpOnly; SameSite=Lax
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Tokens refreshed successfully
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        type: object
+                        properties:
+                          id:
+                            type: integer
+                            example: 10
+                          role:
+                            type: string
+                            example: patient
+        '401':
+          description: Missing, invalid, or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Refresh token reuse detected (family revoked) or account suspended
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: Log out user and revoke session
+      description: Clears authentication cookies and marks the active refresh token as revoked in PostgreSQL.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken:
+                  type: string
+                  description: Optional if provided via HTTP-only cookie
+      responses:
+        '200':
+          description: Logged out successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessMessageResponse'
+
+  /api/auth/me:
+    get:
+      tags:
+        - Authentication
+      summary: Retrieve currently authenticated user identity and profile
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Authenticated user details and linked demographic profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/UserWithProfile'
+        '401':
+          description: Authentication required or token expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User account no longer exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/users/profile:
+    get:
+      tags:
+        - Users
+      summary: Retrieve authenticated user's own profile
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      responses:
+        '200':
+          description: User profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      profile:
+                        $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Profile not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags:
+        - Users
+      summary: Update authenticated user's own profile
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                  example: Sita Sharma
+                email:
+                  type: string
+                  format: email
+                  maxLength: 255
+                  example: sita.sharma@example.com
+                phone:
+                  type: string
+                  pattern: '^\+?[1-9]\d{1,14}$'
+                  example: "+919876543210"
+                date_of_birth:
+                  type: string
+                  format: date
+                  example: "1992-06-14"
+                gender:
+                  type: string
+                  enum: [male, female, other, prefer_not_to_say]
+                  example: female
+                address:
+                  type: string
+                  maxLength: 500
+                  example: 42 Ayurveda Marg, Varanasi, UP
+                emergency_contact:
+                  type: string
+                  maxLength: 100
+                  example: "Ramesh Sharma: +919876500000"
+      responses:
+        '200':
+          description: Profile updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Profile updated successfully
+                  data:
+                    type: object
+                    properties:
+                      profile:
+                        $ref: '#/components/schemas/UserProfile'
+        '400':
+          description: Validation error or invalid date/phone format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Email address already in use by another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/doctors:
+    get:
+      tags:
+        - Doctors
+      summary: Browse and search verified Ayurvedic doctors
+      description: Returns verified doctors with public credentials, specialization, and consultation fees.
+      parameters:
+        - in: query
+          name: specialization
+          schema:
+            type: string
+          description: Filter by clinical specialization
+          example: Kayachikitsa
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Maximum records to return
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Records offset for pagination
+      responses:
+        '200':
+          description: List of verified doctors
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      doctors:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Doctor'
+
+  /api/doctors/profile:
+    get:
+      tags:
+        - Doctors
+      summary: Retrieve authenticated doctor's own professional credentials
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Doctor professional profile details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      doctor:
+                        $ref: '#/components/schemas/Doctor'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Doctor role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Doctor profile not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags:
+        - Doctors
+      summary: Update authenticated doctor's professional profile
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                specialization:
+                  type: string
+                  minLength: 2
+                  maxLength: 100
+                  example: Kayachikitsa & Panchakarma
+                qualification:
+                  type: string
+                  minLength: 2
+                  maxLength: 255
+                  example: BAMS, MD (Ayurveda)
+                experience_years:
+                  type: integer
+                  minimum: 0
+                  example: 14
+                consultation_fee:
+                  type: number
+                  minimum: 0
+                  example: 750.00
+                bio:
+                  type: string
+                  maxLength: 1000
+                  example: Senior Ayurvedic Practitioner with 14 years clinical experience in Panchakarma.
+      responses:
+        '200':
+          description: Doctor profile updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Doctor profile updated successfully
+                  data:
+                    type: object
+                    properties:
+                      doctor:
+                        $ref: '#/components/schemas/Doctor'
+        '400':
+          description: Validation error, negative values, or unrecognized fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Doctor role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/doctors/{id}:
+    get:
+      tags:
+        - Doctors
+      summary: Retrieve public doctor details by doctor profile ID
+      description: >-
+        Retrieves doctor information by doctors.id. Only verified doctors are publicly visible.
+        Unverified profiles are only accessible by the doctor themselves or an administrator.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: Doctor profile ID (doctors.id)
+          example: 62
+      responses:
+        '200':
+          description: Doctor details retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      doctor:
+                        $ref: '#/components/schemas/Doctor'
+        '400':
+          description: Invalid doctor ID format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Doctor not found or unverified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/availability:
+    get:
+      tags:
+        - Availability
+      summary: List doctor availability slots
+      description: >-
+        Browses availability slots. By default, public users and patients can only see 'available' slots.
+        Authenticated doctors can view their own 'booked' or 'cancelled' slots.
+      parameters:
+        - in: query
+          name: doctor_id
+          schema:
+            type: integer
+          description: Filter slots by doctor profile ID
+          example: 62
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date-time
+          description: Filter slots starting at or after this timestamp
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date-time
+          description: Filter slots ending at or before this timestamp
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [available, booked, cancelled]
+            default: available
+          description: Slot status filter (non-available statuses restricted to owning doctor)
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: List of availability slots
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  count:
+                    type: integer
+                    example: 5
+                  data:
+                    type: object
+                    properties:
+                      slots:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AvailabilitySlot'
+        '400':
+          description: Invalid query parameters, invalid date format, or invalid limit/offset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden attempt to view non-available slots belonging to another doctor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags:
+        - Availability
+      summary: Create doctor availability slot
+      description: >-
+        Creates a new availability slot for the authenticated doctor. Rejects timestamps in the past
+        and slots where start_time >= end_time. Prevents overlaps using a database exclusion constraint.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [start_time, end_time]
+              properties:
+                start_time:
+                  type: string
+                  format: date-time
+                  example: '2026-11-15T09:00:00.000Z'
+                end_time:
+                  type: string
+                  format: date-time
+                  example: '2026-11-15T09:30:00.000Z'
+      responses:
+        '201':
+          description: Availability slot created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Availability slot created successfully
+                  data:
+                    type: object
+                    properties:
+                      slot:
+                        $ref: '#/components/schemas/AvailabilitySlot'
+        '400':
+          description: Invalid timestamp, start time in past, or start_time >= end_time
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Doctor role required or doctor profile not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Slot overlaps with an existing active slot for this doctor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/availability/doctor/{doctorId}:
+    get:
+      tags:
+        - Availability
+      summary: Retrieve availability slots for a specific doctor
+      description: Returns available slots strictly filtered by the specified doctor ID in the URL path.
+      parameters:
+        - in: path
+          name: doctorId
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: Doctor profile ID
+          example: 62
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Slots for specified doctor
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  count:
+                    type: integer
+                    example: 3
+                  data:
+                    type: object
+                    properties:
+                      slots:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AvailabilitySlot'
+        '400':
+          description: Invalid doctorId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/availability/{id}:
+    get:
+      tags:
+        - Availability
+      summary: Retrieve specific availability slot by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          example: 45
+      responses:
+        '200':
+          description: Slot details retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      slot:
+                        $ref: '#/components/schemas/AvailabilitySlot'
+        '400':
+          description: Invalid slot ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Slot not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags:
+        - Availability
+      summary: Update availability slot time or status
+      description: >-
+        Updates start_time, end_time, or status ('available' or 'cancelled').
+        Doctors cannot manually set status to 'booked'. Cannot modify slots that are already booked.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          example: 45
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                start_time:
+                  type: string
+                  format: date-time
+                  example: '2026-11-15T10:00:00.000Z'
+                end_time:
+                  type: string
+                  format: date-time
+                  example: '2026-11-15T10:30:00.000Z'
+                status:
+                  type: string
+                  enum: [available, cancelled]
+                  example: cancelled
+      responses:
+        '200':
+          description: Slot updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Availability slot updated successfully
+                  data:
+                    type: object
+                    properties:
+                      slot:
+                        $ref: '#/components/schemas/AvailabilitySlot'
+        '400':
+          description: Invalid field, past timestamp, or attempt to manually set status to 'booked'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Doctor role required or attempt to modify another doctor's slot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Slot not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Cannot modify an already booked slot or slot overlaps with existing slot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags:
+        - Availability
+      summary: Delete an unbooked availability slot
+      description: Removes an unbooked slot. Already booked slots cannot be deleted and return HTTP 409.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          example: 45
+      responses:
+        '200':
+          description: Availability slot deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessMessageResponse'
+        '400':
+          description: Invalid slot ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Attempt to delete another doctor's slot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Slot not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Cannot delete an availability slot that is already booked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/consultations:
+    post:
+      tags:
+        - Consultations
+      summary: Book an availability slot as a patient (Supports Request Idempotency)
+      description: >-
+        Reserves an available slot for a consultation. Enforces row-level locking (`SELECT ... FOR UPDATE`)
+        to serialize concurrent booking attempts.
+        Supports request-level idempotency via the 'Idempotency-Key' header. Retrying with the same key
+        and payload returns the cached response with header `Idempotent-Replayed: true`. Reusing the key
+        with a modified payload returns HTTP 422.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema:
+            type: string
+            maxLength: 255
+          description: >-
+            Optional client-generated unique key (e.g. UUIDv4, max 255 chars) guaranteeing write idempotency.
+            Safe to retry on network timeouts without duplicate booking creation.
+          example: 9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [availability_slot_id]
+              properties:
+                availability_slot_id:
+                  type: integer
+                  minimum: 1
+                  description: Positive ID of the availability slot to book
+                  example: 45
+                doctor_id:
+                  type: integer
+                  minimum: 1
+                  description: Optional verification that the slot belongs to this doctor
+                  example: 62
+                notes:
+                  type: string
+                  maxLength: 500
+                  description: Patient clinical symptoms or concerns
+                  example: Experiencing persistent Vata aggravation, chronic joint stiffness, and insomnia.
+      responses:
+        '201':
+          description: Consultation booked successfully
+          headers:
+            Idempotent-Replayed:
+              schema:
+                type: string
+                example: "true"
+              description: Present and set to 'true' if the response was replayed from a previous idempotent execution.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Consultation booked successfully
+                  data:
+                    type: object
+                    properties:
+                      consultation:
+                        $ref: '#/components/schemas/Consultation'
+        '400':
+          description: Invalid availability_slot_id, doctor mismatch, past slot, or invalid Idempotency-Key header
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Non-patient role or inactive patient account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Availability slot not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Availability slot is already booked or unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Entity — Idempotency key reused with a different request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                message: Idempotency key reused with a different request payload
+    get:
+      tags:
+        - Consultations
+      summary: List authenticated user's consultations
+      description: Returns consultations for the authenticated patient, doctor, or all consultations for admin.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [booked, confirmed, in_progress, completed, cancelled, no_show]
+          description: Filter consultations by lifecycle status
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: List of user consultations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  count:
+                    type: integer
+                    example: 2
+                  data:
+                    type: object
+                    properties:
+                      consultations:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ConsultationDetail'
+        '400':
+          description: Invalid query parameters or timestamp formats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/consultations/book:
+    post:
+      tags:
+        - Consultations
+      summary: Alias for booking consultation endpoint
+      description: Route alias for POST /api/consultations with identical request body, idempotency behavior, and responses.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema:
+            type: string
+            maxLength: 255
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [availability_slot_id]
+              properties:
+                availability_slot_id:
+                  type: integer
+                  minimum: 1
+                  example: 45
+                doctor_id:
+                  type: integer
+                  minimum: 1
+                  example: 62
+                notes:
+                  type: string
+                  maxLength: 500
+      responses:
+        '201':
+          description: Consultation booked successfully
+          headers:
+            Idempotent-Replayed:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Consultation booked successfully
+                  data:
+                    type: object
+                    properties:
+                      consultation:
+                        $ref: '#/components/schemas/Consultation'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+        '422':
+          description: Idempotency key reused with different payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/consultations/my:
+    get:
+      tags:
+        - Consultations
+      summary: Alias for listing user's consultations
+      description: Route alias for GET /api/consultations with identical query parameters and response structure.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [booked, confirmed, in_progress, completed, cancelled, no_show]
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of user consultations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  count:
+                    type: integer
+                  data:
+                    type: object
+                    properties:
+                      consultations:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ConsultationDetail'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/consultations/{id}:
+    get:
+      tags:
+        - Consultations
+      summary: Retrieve consultation details by ID
+      description: Accessible only by the owning patient, the assigned doctor, or an administrator.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          example: 12
+      responses:
+        '200':
+          description: Consultation details retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      consultation:
+                        $ref: '#/components/schemas/ConsultationDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Forbidden access to another user's consultation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+    patch:
+      tags:
+        - Consultations
+      summary: Update consultation lifecycle state and clinical timestamps
+      description: >-
+        Permitted for the assigned doctor or an administrator. Enforces valid status state transitions
+        (`booked` -> `confirmed`/`in_progress`/`cancelled`, `confirmed` -> `in_progress`, `in_progress` -> `completed`/`no_show`).
+        Terminal statuses (`completed`, `cancelled`, `no_show`) cannot be modified.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          example: 12
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [booked, confirmed, in_progress, completed, cancelled, no_show]
+                  example: in_progress
+                started_at:
+                  type: string
+                  format: date-time
+                  example: '2026-11-15T09:05:00.000Z'
+                ended_at:
+                  type: string
+                  format: date-time
+                  example: '2026-11-15T09:35:00.000Z'
+                notes:
+                  type: string
+                  maxLength: 2000
+                  example: Patient responded favorably to initial Abhyanga assessment.
+      responses:
+        '200':
+          description: Consultation lifecycle updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Consultation status updated
+                  data:
+                    type: object
+                    properties:
+                      consultation:
+                        $ref: '#/components/schemas/Consultation'
+        '400':
+          description: Invalid status transition, inverted timestamps, or modifying terminal status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Only assigned doctor or admin can update consultation lifecycle
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/consultations/{id}/cancel:
+    patch:
+      tags:
+        - Consultations
+      summary: Cancel a booked or confirmed consultation
+      description: >-
+        Cancels the consultation and atomically releases the associated availability slot back to 'available'.
+        Allowed only for the patient who booked or the assigned doctor. Consultations already completed,
+        in progress, or cancelled cannot be cancelled.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          example: 12
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  example: Schedule conflict
+      responses:
+        '200':
+          description: Consultation cancelled successfully and slot released
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Consultation cancelled successfully
+                  data:
+                    type: object
+                    properties:
+                      consultation:
+                        $ref: '#/components/schemas/Consultation'
+        '400':
+          description: Consultation is already completed, in progress, or cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Unauthorized to cancel another user's consultation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/prescriptions:
+    post:
+      tags:
+        - Prescriptions
+      summary: Issue clinical prescription for a consultation
+      description: Permitted only for the doctor assigned to the consultation. Prescription details are stored as JSONB.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [consultation_id, prescription_details]
+              properties:
+                consultation_id:
+                  type: integer
+                  minimum: 1
+                  example: 12
+                prescription_details:
+                  type: object
+                  description: Structured medication instructions and herbal recommendations
+                  example:
+                    diagnosis: Vataja Shiroroga
+                    medications:
+                      - name: Brahmi Vati
+                        dosage: 1 tablet twice daily with warm milk
+                        duration: 30 days
+                      - name: Ksheerabala 101 Taila
+                        dosage: 4 drops in each nostril (Nasya)
+                        duration: 14 days
+                    dietary_advice: Avoid cold, dry foods. Consume warm, unctuous meals.
+                notes:
+                  type: string
+                  maxLength: 1000
+                  example: Schedule follow-up after 4 weeks.
+      responses:
+        '201':
+          description: Prescription issued successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Prescription recorded successfully
+                  data:
+                    type: object
+                    properties:
+                      prescription:
+                        $ref: '#/components/schemas/Prescription'
+        '400':
+          description: Missing consultation_id or empty prescription_details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Doctor role required or caller is not the assigned doctor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Consultation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/prescriptions/my:
+    get:
+      tags:
+        - Prescriptions
+      summary: List user's prescriptions
+      description: Returns prescriptions where the authenticated user is the patient (for patients) or the issuing doctor (for doctors).
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      responses:
+        '200':
+          description: List of user prescriptions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  count:
+                    type: integer
+                    example: 2
+                  data:
+                    type: object
+                    properties:
+                      prescriptions:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Prescription'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/prescriptions/{id}:
+    get:
+      tags:
+        - Prescriptions
+      summary: Retrieve prescription details by ID
+      description: Accessible only by the receiving patient, issuing doctor, or an administrator.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          example: 5
+      responses:
+        '200':
+          description: Prescription details retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      prescription:
+                        $ref: '#/components/schemas/Prescription'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Forbidden access to another user's prescription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/payments:
+    post:
+      tags:
+        - Payments
+      summary: Record consultation fee payment
+      description: >-
+        Permitted only for the patient who owns the consultation. Doctors cannot record patient payments.
+        Consultations that are already paid return HTTP 409.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [consultation_id]
+              properties:
+                consultation_id:
+                  type: integer
+                  minimum: 1
+                  example: 12
+                amount:
+                  type: number
+                  minimum: 0
+                  description: Optional override amount; defaults to doctor consultation_fee
+                  example: 600.00
+                currency:
+                  type: string
+                  default: INR
+                  example: INR
+                status:
+                  type: string
+                  enum: [pending, completed, failed, refunded]
+                  default: completed
+                  example: completed
+                provider_reference:
+                  type: string
+                  example: PAY-UPI-20261115-992381
+      responses:
+        '200':
+          description: Payment record processed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Payment record processed successfully
+                  data:
+                    type: object
+                    properties:
+                      payment:
+                        $ref: '#/components/schemas/Payment'
+        '400':
+          description: Invalid consultation_id, negative amount, or invalid payment status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Doctor role blocked or patient attempting to pay for another patient's consultation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Consultation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Consultation is already paid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/payments/consultation/{consultationId}:
+    get:
+      tags:
+        - Payments
+      summary: Retrieve payment record for a consultation
+      description: Accessible only by the owning patient or the assigned doctor.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: consultationId
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          example: 12
+      responses:
+        '200':
+          description: Payment record retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      payment:
+                        $ref: '#/components/schemas/Payment'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Forbidden access to another user's payment record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Consultation or payment record not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/admin/metrics:
+    get:
+      tags:
+        - Administration
+      summary: Retrieve platform operational and revenue metrics
+      description: Aggregates total users, doctor verifications, consultation counts, and total platform revenue.
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Operational metrics retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      metrics:
+                        type: object
+                        properties:
+                          total_users:
+                            type: integer
+                            example: 1500
+                          total_doctors:
+                            type: integer
+                            example: 120
+                          verified_doctors:
+                            type: integer
+                            example: 95
+                          total_consultations:
+                            type: integer
+                            example: 3420
+                          completed_consultations:
+                            type: integer
+                            example: 2890
+                          total_revenue:
+                            type: number
+                            example: 1734000.00
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/admin/doctors/pending:
+    get:
+      tags:
+        - Administration
+      summary: List doctor applications pending verification
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      responses:
+        '200':
+          description: List of pending doctors
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      doctors:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Doctor'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /api/admin/doctors/{id}/verify:
+    patch:
+      tags:
+        - Administration
+      summary: Approve or reject a doctor's verification status
+      description: Sets verification_status to 'verified' or 'rejected'. Expects the doctor profile ID (doctors.id).
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: Doctor profile ID (doctors.id)
+          example: 62
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [verified, rejected]
+                  example: verified
+      responses:
+        '200':
+          description: Doctor verification status updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Doctor verification status updated to verified
+                  data:
+                    type: object
+                    properties:
+                      doctor:
+                        $ref: '#/components/schemas/Doctor'
+        '400':
+          description: Status must be either 'verified' or 'rejected'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Doctor profile not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Stateless JWT access token transmitted in Authorization header as 'Bearer <token>'.
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: accessToken
+      description: Stateless JWT access token automatically transmitted in the HTTP-only 'accessToken' cookie.
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 10
+        name:
+          type: string
+          example: Sita Sharma
+        email:
+          type: string
+          format: email
+          example: sita.sharma@example.com
+        role:
+          type: string
+          enum: [patient, doctor, admin]
+          example: patient
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+          example: active
+        created_at:
+          type: string
+          format: date-time
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 10
+        user_id:
+          type: integer
+          example: 10
+        phone:
+          type: string
+          example: "+919876543210"
+        date_of_birth:
+          type: string
+          format: date
+          example: "1992-06-14"
+        gender:
+          type: string
+          enum: [male, female, other, prefer_not_to_say]
+          example: female
+        address:
+          type: string
+          example: 42 Ayurveda Marg, Varanasi, UP
+        emergency_contact:
+          type: string
+          example: "Ramesh Sharma: +919876500000"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UserWithProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 10
+        name:
+          type: string
+          example: Sita Sharma
+        email:
+          type: string
+          format: email
+          example: sita.sharma@example.com
+        role:
+          type: string
+          example: patient
+        status:
+          type: string
+          example: active
+        created_at:
+          type: string
+          format: date-time
+        profile:
+          type: object
+          properties:
+            phone:
+              type: string
+              example: "+919876543210"
+            date_of_birth:
+              type: string
+              format: date
+              example: "1992-06-14"
+            gender:
+              type: string
+              example: female
+            address:
+              type: string
+              example: 42 Ayurveda Marg, Varanasi, UP
+            emergency_contact:
+              type: string
+              example: "Ramesh Sharma: +919876500000"
+
+    Doctor:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Doctor profile ID (doctors.id)
+          example: 62
+        user_id:
+          type: integer
+          description: Associated user account ID (users.id)
+          example: 192
+        name:
+          type: string
+          example: Dr. Charaka Sharma
+        email:
+          type: string
+          format: email
+          example: dr.charaka@amrutam.example.com
+        specialization:
+          type: string
+          example: Kayachikitsa & Panchakarma
+        qualification:
+          type: string
+          example: BAMS, MD (Ayurveda)
+        experience_years:
+          type: integer
+          example: 12
+        consultation_fee:
+          type: number
+          example: 600.00
+        verification_status:
+          type: string
+          enum: [pending, verified, rejected]
+          example: verified
+        bio:
+          type: string
+          example: Senior Ayurvedic Physician specializing in metabolic and chronic lifestyle disorders.
+
+    AvailabilitySlot:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 45
+        doctor_id:
+          type: integer
+          example: 62
+        start_time:
+          type: string
+          format: date-time
+          example: '2026-11-15T09:00:00.000Z'
+        end_time:
+          type: string
+          format: date-time
+          example: '2026-11-15T09:30:00.000Z'
+        status:
+          type: string
+          enum: [available, booked, cancelled]
+          example: available
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Consultation:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 12
+        patient_id:
+          type: integer
+          example: 10
+        doctor_id:
+          type: integer
+          example: 62
+        availability_slot_id:
+          type: integer
+          example: 45
+        booking_reference:
+          type: string
+          example: CON-17932849102-A8F29C
+        status:
+          type: string
+          enum: [booked, confirmed, in_progress, completed, cancelled, no_show]
+          example: booked
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+          example: Experiencing joint stiffness and insomnia.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ConsultationDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 12
+        booking_reference:
+          type: string
+          example: CON-17932849102-A8F29C
+        status:
+          type: string
+          example: booked
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        patient_id:
+          type: integer
+          example: 10
+        patient_name:
+          type: string
+          example: Sita Sharma
+        patient_email:
+          type: string
+          format: email
+          example: sita.sharma@example.com
+        doctor_id:
+          type: integer
+          example: 62
+        doctor_name:
+          type: string
+          example: Dr. Charaka Sharma
+        specialization:
+          type: string
+          example: Kayachikitsa & Panchakarma
+        consultation_fee:
+          type: number
+          example: 600.00
+        slot_id:
+          type: integer
+          example: 45
+        start_time:
+          type: string
+          format: date-time
+          example: '2026-11-15T09:00:00.000Z'
+        end_time:
+          type: string
+          format: date-time
+          example: '2026-11-15T09:30:00.000Z'
+
+    Prescription:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 5
+        consultation_id:
+          type: integer
+          example: 12
+        doctor_id:
+          type: integer
+          example: 62
+        patient_id:
+          type: integer
+          example: 10
+        prescription_details:
+          type: object
+          example:
+            diagnosis: Vataja Shiroroga
+            medications:
+              - name: Brahmi Vati
+                dosage: 1 tablet twice daily
+                duration: 30 days
+        notes:
+          type: string
+          nullable: true
+          example: Follow-up after 4 weeks.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 8
+        consultation_id:
+          type: integer
+          example: 12
+        amount:
+          type: number
+          example: 600.00
+        currency:
+          type: string
+          example: INR
+        status:
+          type: string
+          enum: [pending, completed, failed, refunded]
+          example: completed
+        provider_reference:
+          type: string
+          nullable: true
+          example: PAY-UPI-20261115-992381
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        statusCode:
+          type: integer
+          example: 400
+        message:
+          type: string
+          example: Invalid request parameters
+        requestId:
+          type: string
+          example: a7b189c4-8392-4820-9182-384729103829
+        errors:
+          type: array
+          items:
+            type: object
+          description: Optional list of detailed Zod validation issue objects
+
+    SuccessMessageResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Operation completed successfully
+
+  responses:
+    BadRequestError:
+      description: Bad Request — Validation error or invalid parameter format
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnauthorizedError:
+      description: Unauthorized — Authentication required, missing token, or token expired
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ForbiddenError:
+      description: Forbidden — Insufficient role permissions or resource ownership check failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFoundError:
+      description: Not Found — Requested resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ConflictError:
+      description: Conflict — Resource state conflict or duplicate booking attempt
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
