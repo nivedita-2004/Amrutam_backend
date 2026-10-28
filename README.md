@@ -294,9 +294,9 @@ Amrutum_assessement/
 │   │   ├── prescription.route.js
 │   │   └── user.route.js
 │   ├── utils/
-│   │   ├── ApiError.js                 # Custom error class with HTTP status codes
-│   │   ├── asyncHandler.js             # Async error wrapper
-│   │   └── logger.js                   # Pino logger instance
+│   │   ├── logger.js      # Pino logger instance           
+│   │
+│   │                    
 │   ├── validators/
 │   │   ├── auth.validator.js
 │   │   ├── availability.validator.js
